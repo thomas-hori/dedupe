@@ -109,7 +109,7 @@ genre_to_name={#From Appendix A of ID3v2.2 Standard
     106:"Symphony",
     107:"Booty Bass",
     108:"Primus",
-    109:"Porn Groove", #XXX What???
+    109:"[Inappropriate] Groove", #NB: This weird genre I have changed because I care about what strings I have in my program!
     110:"Satire",
     111:"Slow Jam",
     112:"Club",
@@ -126,9 +126,10 @@ genre_to_name={#From Appendix A of ID3v2.2 Standard
     123:"A capella",
     124:"Euro-House",
     125:"Dance Hall",
-    #the empty field:
+    #the "empty field":
     255:None
 }
+
 for i in range(126,225):
     genre_to_name[i]="ID3v1 Genre %d (nonstandard)"%i
 
@@ -138,6 +139,7 @@ class Id3dat: #Read "struct"
         s.tags=[]
         s.id3v1=Id3v1dat()
         s.id3v2=Id3v2dat()
+        s.id3v2s=[s.id3v2]
 
 class Id3v1dat: #Read "struct"
     def __init__(s):
@@ -149,19 +151,22 @@ class Id3v1dat: #Read "struct"
         s.rest_of_album=None
         s.year=None
         s.comment=None
-        s.track=0 #The "undefined" value it is going to wind up with if comment 28 bytes or lower
+        s.track=0 #The "unset" value
         s.genre=None
         s.textual_genre=None
-        s.speed=0 #0=unset, 1=slow, 2= medium, 3=fast, 4=hardcore
+        s.speed=0 #The "unset" value, speed stated with 1-4 (1 lowest) on a qualitative scale
         s.start_time=None #mmm:ss
         s.end_time=None #mmm:ss
 
 class Id3v2dat: #Read "struct"
-    version=None #i.e. id3v2.* (starts at 2...it seems they changed their mind on whether the next backwards incompatible version was a 2.x or not)
-    revision=None#e.g. id3v2.2.*
-    flags=None #MSb=Global Unsynchronisation Used, next=Extended header present (it was planned in the id3v2[.2] standard for this to be compression but it is NOT), next=Tag is experimental, next=Footer Present
-    extended_header="" # *** IN THIS PARSER *** not including the size int
-    frames=[]
+    def __init__(s):
+        s.version=None #i.e. id3v2.* (starts at 2...it seems they changed their mind on whether the next backwards incompatible version was a 2.x or not)
+        s.revision=None#e.g. id3v2.2.*
+        s.flags=None #MSb=Global Unsynchronisation Used, next=Extended header present (it was planned in the id3v2[.2] standard for this to be compression but it is NOT), next=Tag is experimental, next=Footer Present
+        s.extended_header="" # *** IN THIS PARSER *** not including the size int
+        s.frames=[]
+        s.start_offset=None
+        s.end_offset=None #I think this is the first byte that is not part of the tag
     
 def read_id3(file):
     datman=Id3dat()
@@ -198,7 +203,22 @@ def read_id3(file):
     while 1:
         seekage=0
         if file.read(3)!="ID3":
-            break
+            file.seek(-1,2)
+            for unqueried in range(1024*128):#128KiB (128 binary KB) should be ample for passing other tagging systems (id3v1, extensions therof, perhaps LAME tag)...
+                if file.read(3)=="3DI":
+                    #Yay,we have a postpend
+                    file.read(3) #Don't care about version,revision,flags yet, want the *tag*
+                    size=ord(file.read(1)) <<21 #Yes, that's a 21.  Not a 24.
+                    size+=ord(file.read(1))<<14 #Yes, that's a 14.  Not a 16.
+                    size+=ord(file.read(1))<<7  #Yes, that's a 7.  Not an 8.
+                    size+=ord(file.read(1))
+                    f.seek(-(20+size),1)#From end to tag to beginning
+                    break
+                else:
+                    file.seek(-4,1)
+            else:
+                break
+        datman.id3v2.start_offset=file.tell()-3
         datman.id3v2.version=ord(file.read(1))
         datman.id3v2.revision=ord(file.read(1))
         datman.id3v2.flags=ord(file.read(1))
@@ -265,14 +285,29 @@ def read_id3(file):
                 #Encoding byte: 0=latin1,1=utf16bom,2=utf16be,3=utf8
                 datman.id3v2.frames.append((id,flags,ord(dat[0]),dat[1:]))
             framelist_size-=size
+        #id3v2s should contain only a ref to id3v2 if only one tag
+        #if many tags id3v2s should be a seperate object containing all frames
+        #this code really should read like a book but it doesn't...
+        if len(datman.id3v2s)>1 or seekage:
+            import copy
+            datman.id3v2=copy.copy(datman.id3v2)
+            if seekage:
+                datman.id3v2s.append(datman.id3v2)
+            if len(datman.id3v2s)>1:
+                #Drop extra tags
+                datman.id3v2s[-1].frames=datman.id3v2s[-1].frames[len(datman.id3v2s[-2].frames):]
         if seekage:
+            datman.id3v2.end_offset=file.tell()+framelist_size
             file.seek(framelist_size+seekage,1)
         else:
             break
     return datman
 if __name__=="__main__":
     f=open("SUNDANCE.mp3","rb")
+    f2=open("SUNDANCE_id3v1.mp3","rb")
     import os
     os.environ["PYTHONINSPECT"]="1"
     result=read_id3(f)
     print "The return value is in 'result'"
+    result_v1=read_id3(f2)
+    print "The other return value is in 'result_v1'"
