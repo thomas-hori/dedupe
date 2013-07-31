@@ -133,13 +133,13 @@ genre_to_name={#From Appendix A of ID3v2.2 Standard
 for i in range(126,225):
     genre_to_name[i]="ID3v1 Genre %d (nonstandard)"%i
 
-class Id3dat: #Read "struct"
+class Id3dat: #Read "struct" (unsure for this particular one)
     def __init__(s):
         s.last_byte_of_actual_audio=-1
         s.tags=[]
         s.id3v1=Id3v1dat()
-        s.id3v2=Id3v2dat()
-        s.id3v2s=[s.id3v2]
+        s.id3v2s=[]
+        s.id3v2=Pluralv2(s.id3v2s)
 
 class Id3v1dat: #Read "struct"
     def __init__(s):
@@ -168,6 +168,25 @@ class Id3v2dat: #Read "struct"
         s.start_offset=None
         s.end_offset=None #I think this is the first byte that is not part of the tag
     
+class Pluralv2(Id3v2dat): #This one is definitely a "class"
+    def __init__(s,l):
+        s.__dict__["list_of_sources"]=l
+    def __getattr__(s,n):
+        if n!="frames":
+            l=map(lambda source,n=n:getattr(source,n),s.list_of_sources)
+            if len(l)==1:
+                l=l[0]
+            else:
+                l=tuple(l)
+        else:
+            l=[]
+            for source in s.list_of_sources:
+                #print l,source.frames
+                l.extend(source.frames)
+        return l
+    def __setattr__(s,n,v):
+        setattr(s.list_of_sources[-1],n,v) #Set it on the current tag
+
 def read_id3(file):
     datman=Id3dat()
     #ID3v1
@@ -199,25 +218,35 @@ def read_id3(file):
         datman.id3v1.start_time=file.read(6)
         datman.id3v1.end_time=file.read(6)
     #ID3v2
+    did_end=0
     file.seek(0,0)
+    seekage=0 #Bind the local
     while 1:
-        seekage=0
-        if file.read(3)!="ID3":
-            file.seek(-1,2)
-            for unqueried in range(1024*128):#128KiB (128 binary KB) should be ample for passing other tagging systems (id3v1, extensions therof, perhaps LAME tag)...
+        if (file.read(3)!="ID3") or (seekage=="FINAL CHECK"):
+            file.seek(-10,2)
+            #128KiB (128 binary KB) should be ample for passing other tagging systems (id3v1, extensions therof, perhaps LAME tag)...
+            #Though SUNDANCE.mp3 (rendered by me from PM's module with OpenMPT or perhaps XMPlay+LAME or XMplay+FFmpeg) had 82 identical lame tags somehow making around 67KiB...
+            for unqueried in range(1024*128):
                 if file.read(3)=="3DI":
+                    #print file.tell()
                     #Yay,we have a postpend
                     file.read(3) #Don't care about version,revision,flags yet, want the *tag*
                     size=ord(file.read(1)) <<21 #Yes, that's a 21.  Not a 24.
                     size+=ord(file.read(1))<<14 #Yes, that's a 14.  Not a 16.
                     size+=ord(file.read(1))<<7  #Yes, that's a 7.  Not an 8.
                     size+=ord(file.read(1))
-                    f.seek(-(20+size),1)#From end to tag to beginning
+                    #print file.tell()
+                    #print size
+                    file.seek(-(17+size),1)#From end to tag to beginning, discounting first magic
+                    did_end=1
+                    #print file.tell()
                     break
                 else:
                     file.seek(-4,1)
             else:
                 break
+        seekage=0
+        datman.id3v2s.append(Id3v2dat())
         datman.id3v2.start_offset=file.tell()-3
         datman.id3v2.version=ord(file.read(1))
         datman.id3v2.revision=ord(file.read(1))
@@ -227,7 +256,7 @@ def read_id3(file):
         size+=ord(file.read(1))<<7  #Yes, that's a 7.  Not an 8.
         size+=ord(file.read(1))
         framelist_size=size
-        if datman.id3v2.flags&0x01000000:
+        if datman.id3v2s[-1].flags&0x01000000:
             sizel=map(ord,list(file.read(4)))
             #In ID3v2.3 it is a regular Long BUT never even remotely exceeds 127
             #In ID3v2.4 and the forseeable future the size value is a Synchsafe Long
@@ -235,7 +264,7 @@ def read_id3(file):
             size+=ord(file.read(1))<<14 #Yes, that's a 14.  Not a 16.
             size+=ord(file.read(1))<<7  #Yes, that's a 7.  Not an 8.
             size+=ord(file.read(1))
-            if datman.id3v2.version<4:
+            if datman.id3v2s[-1].version<4:
                 #In ID3v2.3 the size value excludes itself
                 datman.id3v2.extended_header=file.read(size)
                 framelist_size-=(size+4)
@@ -244,7 +273,7 @@ def read_id3(file):
                 datman.id3v2.extended_header=file.read(size-4)
                 framelist_size-=size
         while framelist_size:
-            if datman.id3v2.version==2:
+            if datman.id3v2s[-1].version==2:
                 id=file.read(3)
                 if id=="\0\0\0":break
                 #No, there is no fourth byte
@@ -253,7 +282,7 @@ def read_id3(file):
                 size+=ord(file.read(1))
                 framelist_size-=6
                 flags=0
-            elif datman.id3v2.version==3:
+            elif datman.id3v2s[-1].version==3:
                 id=file.read(4)
                 if id=="\0\0\0\0":break
                 size=ord(file.read(1))<<24 #Yes, that's actually a 24 this time
@@ -263,8 +292,9 @@ def read_id3(file):
                 flags=ord(file.read(1))<<8 #Yes, that's actually an 8 this time
                 flags+=ord(file.read(1))
                 framelist_size-=10
-            elif datman.id3v2.version>=4: #A bit optimistic but hey
+            elif datman.id3v2s[-1].version>=4: #A bit optimistic but hey
                 id=file.read(4)
+                #print id
                 if id=="\0\0\0\0":break
                 size=ord(file.read(1)) <<21 #Yes, that's a 21.  Not a 24.
                 size+=ord(file.read(1))<<14 #Yes, that's a 14.  Not a 16.
@@ -280,34 +310,27 @@ def read_id3(file):
                 seekage+=ord(file.read(1))<<8 #Yes, that's actually an 8 this time
                 seekage+=ord(file.read(1))
             if id[0]!="T" or id[:3]=="TXX":
-                datman.id3v2.frames.append((id,flags,dat))
+                datman.id3v2s[-1].frames.append((id,flags,dat))
             else:
                 #Encoding byte: 0=latin1,1=utf16bom,2=utf16be,3=utf8
-                datman.id3v2.frames.append((id,flags,ord(dat[0]),dat[1:]))
+                datman.id3v2s[-1].frames.append((id,flags,ord(dat[0]),dat[1:]))
             framelist_size-=size
-        #id3v2s should contain only a ref to id3v2 if only one tag
-        #if many tags id3v2s should be a seperate object containing all frames
-        #this code really should read like a book but it doesn't...
-        if len(datman.id3v2s)>1 or seekage:
-            import copy
-            datman.id3v2=copy.copy(datman.id3v2)
-            if seekage:
-                datman.id3v2s.append(datman.id3v2)
-            if len(datman.id3v2s)>1:
-                #Drop extra tags
-                datman.id3v2s[-1].frames=datman.id3v2s[-1].frames[len(datman.id3v2s[-2].frames):]
+        datman.id3v2.end_offset=file.tell()+framelist_size
         if seekage:
-            datman.id3v2.end_offset=file.tell()+framelist_size
             file.seek(framelist_size+seekage,1)
         else:
-            break
+            if did_end:
+                break
+            else:
+                seekage="FINAL CHECK"
     return datman
+    
 if __name__=="__main__":
     f=open("SUNDANCE.mp3","rb")
-    f2=open("SUNDANCE_id3v1.mp3","rb")
+    f2=open("SUNDANCE_alltags.mp3","rb")
     import os
     os.environ["PYTHONINSPECT"]="1"
     result=read_id3(f)
     print "The return value is in 'result'"
-    result_v1=read_id3(f2)
-    print "The other return value is in 'result_v1'"
+    result2=read_id3(f2)
+    print "The other return value is in 'result2'"
