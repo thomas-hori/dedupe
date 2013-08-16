@@ -1,4 +1,6 @@
-#So far for exact dupes and only symlinking, and running on C:\ or /home ONLY
+#So far for exact dupes and only symlinking, and running on curdir ONLY
+#Prints matches on Windows so far
+
 import os,time
 def megalink(a,b):
     os.unlink(b)
@@ -11,12 +13,13 @@ try:
     from hashlib import md5 #For newer pythons
 except ImportError:
     from md5 import md5 #For older pythons
-try:
-    import anydbm #No deletes so dumbdbm will kinda work, preferably gdbm or bsddb though
-except ImportError:
-    import dbm as anydbm #Newer and older pythons
-revhashes=dbm.open("hashes_temp","n")#{} #Dict fills memory like no tomorrow
-for root,dirs,files in os.walk({"nt":"C:\\","posix":"/home"}[os.name]):
+
+import shelve #No deletes so even dumbdbm will kinda work well
+revhashes=shelve.open("hashes_temp.db","n")#{} #Dict fills memory like no tomorrow
+for root,dirs,files in os.walk(os.getcwd()):
+    if (".git" in root) or (".hg" in root) or (".bzr" in root) or (".rcs" in root):
+        #Skip VCSs
+        continue
     for f in files:
         p=os.path.join(root,f)
         fd=open(p,"rb")
@@ -35,4 +38,10 @@ for root,dirs,files in os.walk({"nt":"C:\\","posix":"/home"}[os.name]):
                 revhashes[hash]+=(p,) #Tuples as collision rare - thus optimised
         else:
             revhashes[hash]=(p,) #Tuples as collision rare - thus optimised
-        time.sleep(0.01) #Let the OS breath!
+        time.sleep(0.1) #Let the OS breath!
+
+#unlinking the db is complicated as any one (or pair) of the following may be present:
+#  hashes_temp.db  hashes_temp.db.db  hashes_temp.db.pag  hashes_temp.db.dir
+#  hashes_temp.db.dat
+#This is according to the control of the default dbm system on the python installation.
+
