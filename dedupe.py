@@ -14,8 +14,8 @@ class Hasher(object):
     def check_file(self,path,buffer):
         """Check for duplicates of a file, return path if successful, None otherwise"""
         raise NotImplementedError("should be implemented by subclass")
-    def megalink(self,a,b):
-        """Link a to b, possibly bringing metadata into harmony on the way (according to subclass)"""
+    def dedupe_link(self,a,b):
+        """Link a to b deleting the original b, possibly bringing metadata into harmony on the way (according to subclass)"""
         if os.name=="nt":
             #DO NOT even approach the unlinking stage on Windows!
             print "I would link",`a`,"to",`b`,"but I can't."
@@ -41,8 +41,7 @@ class ExactMd5Hasher(Hasher):
                 b2=fd2.read()
                 fd2.close()
                 if b2==b:
-                    self.megalink(uvver,p)
-                    return
+                    return uvver
             self.revhashes[hash]+=(p,) #Tuples as collision rare - thus optimised
         else:
             self.revhashes[hash]=(p,) #Tuples as collision rare - thus optimised
@@ -61,7 +60,8 @@ for root,dirs,files in os.walk(os.getcwd()):
         b=fd.read()
         fd.close()
         for hasher in hashers:
-            hasher.check_file(p,b)
+            other=hasher.check_file(p,b)
+            hasher.dedupe_link(other,p)
         time.sleep(0.1) #Let the OS breath!
 
 #unlinking the db is complicated as any one (or pair) of the following may be present:
