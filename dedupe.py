@@ -4,7 +4,8 @@
 import os,time
 import shelve #No deletes so even dumbdbm will kinda work well
 
-class Hasher(object):
+class BaseComparer(object):
+    """ABC for comparers"""
     #Should be a mutable object implementing the mapping protocol: hash to sequence
     revhashes=None 
     def fingerprint(self,buffer):
@@ -25,7 +26,7 @@ class Hasher(object):
             os.link(a,b)
         except: #XXX except what?  IOError?  OSError?  RuntimeError?  GrueError?  YASDError?
             os.symlink(a,b)
-class ExactMd5Hasher(Hasher):
+class ExactMd5Hasher(BaseComparer):
     def __init__(self):
         self.revhashes=shelve.open("md5hasher.db","n")#{} #Dict fills memory like no tomorrow
     def check_file(self,p,b):
@@ -46,7 +47,10 @@ class ExactMd5Hasher(Hasher):
         else:
             self.revhashes[hash]=(p,) #Tuples as collision rare - thus optimised
         return None
-hashers=[ExactMd5Hasher()]
+comparers=[ExactMd5Hasher()]
+print "Installed comparers:"
+for comparer in comparers:
+    print "\t"+comparer.__class__.__name__
 for root,dirs,files in os.walk(os.getcwd()):
     #XXX check if these repodirs are corect
     if (".git" in root) or (".hg" in root) or (".bzr" in root) or (".rcs" in root):
@@ -59,9 +63,10 @@ for root,dirs,files in os.walk(os.getcwd()):
         fd=open(p,"rb")
         b=fd.read()
         fd.close()
-        for hasher in hashers:
-            other=hasher.check_file(p,b)
-            hasher.dedupe_link(other,p)
+        for comparer in comparers:
+            other=comparer.check_file(p,b)
+            if other:
+                comparer.dedupe_link(other,p)
         time.sleep(0.1) #Let the OS breath!
 
 #unlinking the db is complicated as any one (or pair) of the following may be present:
