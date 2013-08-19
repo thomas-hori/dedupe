@@ -7,8 +7,8 @@ import shelve #No deletes so even dumbdbm will kinda work well
 class Hasher(object):
     #Should be a mutable object implementing the mapping protocol: hash to sequence
     revhashes=None 
-    def strip_data(self,buffer):
-        """Remove metadata from the buffer and return it, for (e.g.) MP3 data comparison.
+    def fingerprint(self,buffer):
+        """Remove metadata from the buffer and/or smart-fingerprint it (or do nothing) and return it, for (e.g.) MP3 data comparison.
         A hook for mixins."""
         return buffer
     def check_file(self,path,buffer):
@@ -33,7 +33,7 @@ class ExactMd5Hasher(Hasher):
             import hashlib
         except ImportError:
             import md5 as hashlib
-        b=self.strip_data(b)
+        b=self.fingerprint(b)
         hash=hashlib.md5(b).digest() #Not hexdigest as it takes up 2x the space and there is no need for being ascii
         if hash in self.revhashes:
             for uvver in self.revhashes[hash]:
