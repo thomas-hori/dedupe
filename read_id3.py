@@ -136,7 +136,6 @@ for i in range(126,225):
 class Id3dat: #Read "struct" (unsure for this particular one)
     def __init__(s):
         s.last_byte_of_actual_audio=-1
-        s.tags=[]
         s.id3v1=Id3v1dat()
         s.id3v2s=[]
         s.id3v2=Pluralv2(s.id3v2s)
@@ -157,6 +156,7 @@ class Id3v1dat: #Read "struct"
         s.speed=0 #The "unset" value, speed stated with 1-4 (1 lowest) on a qualitative scale
         s.start_time=None #mmm:ss
         s.end_time=None #mmm:ss
+        s.tags=[]
 
 class Id3v2dat: #Read "struct"
     def __init__(s):
@@ -193,7 +193,7 @@ def read_id3(file):
     file.seek(-128,2)
     if file.read(3)=="TAG":
         datman.last_byte_of_actual_audio=-129
-        datman.tags.append("ID3v1[.1]")
+        datman.id3v1.tags.append("ID3v1[.1]")
         datman.id3v1.title=file.read(30)
         datman.id3v1.artist=file.read(30)
         datman.id3v1.album=file.read(30)
